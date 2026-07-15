@@ -1,4 +1,4 @@
-import type { CountItem, DashboardMetrics, DataHealth, Task } from "@/types/task";
+﻿import type { CountItem, DashboardMetrics, DataHealth, Task } from "../types/task";
 
 function countBy(tasks: Task[], key: keyof Task): CountItem[] {
   const counts = new Map<string, number>();
@@ -87,3 +87,4 @@ export function buildDataHealth(tasks: Task[]): DataHealth {
     duplicateTaskIds
   };
 }
+

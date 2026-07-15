@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { COOKIE_NAME, SESSION_SECONDS, createSessionToken, validCredentials } from "@/lib/auth";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { COOKIE_NAME, SESSION_SECONDS, createSessionToken, validCredentials } from "../../../../lib/auth";
 
 export const runtime = "nodejs";
 
@@ -20,3 +20,4 @@ export async function POST(request: NextRequest) {
   });
   return response;
 }
+

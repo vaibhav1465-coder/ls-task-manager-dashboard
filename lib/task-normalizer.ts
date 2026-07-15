@@ -1,4 +1,4 @@
-import type { Task } from "@/types/task";
+﻿import type { Task } from "../types/task";
 
 const aliases: Record<keyof Omit<Task, "raw" | "daysOpen" | "month">, string[]> = {
   taskId: ["task id", "taskid", "id"],
@@ -155,3 +155,4 @@ export function rowsToTasks(values: string[][]): Task[] {
       };
     });
 }
+

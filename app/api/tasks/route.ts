@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { fetchTaskDashboard } from "@/lib/google-sheets";
-import { COOKIE_NAME, verifySessionToken } from "@/lib/auth";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { fetchTaskDashboard } from "../../../lib/google-sheets";
+import { COOKIE_NAME, verifySessionToken } from "../../../lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,3 +40,4 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+

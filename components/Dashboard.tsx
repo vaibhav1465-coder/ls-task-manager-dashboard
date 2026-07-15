@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -37,7 +37,7 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import type { CountItem, Task, TaskApiResponse } from "@/types/task";
+import type { CountItem, Task, TaskApiResponse } from "../types/task";
 
 const STATUS_COLORS: Record<string, string> = {
   Completed: "#16a34a",
@@ -53,7 +53,7 @@ const PAGE_SIZE = 10;
 type SortKey = "taskId" | "taskName" | "owner" | "priority" | "status" | "daysOpen";
 
 function formatDate(value: string | null) {
-  if (!value) return "—";
+  if (!value) return "â€”";
   return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(
     new Date(`${value}T00:00:00`)
   );
@@ -257,7 +257,7 @@ export default function Dashboard() {
         <div className="topbar-actions">
           <div className="source-badge">
             <span className="live-dot" />
-            Google Sheet live · {data.meta.sheetTitle}
+            Google Sheet live Â· {data.meta.sheetTitle}
           </div>
           <button className="secondary-button" onClick={() => load(true)} disabled={loading}>
             <RefreshCw size={16} className={loading ? "spin" : ""} /> Refresh
@@ -284,7 +284,7 @@ export default function Dashboard() {
         <article className="kpi-card"><div className="kpi-icon"><LayoutDashboard /></div><div><span>Total tasks</span><strong>{m.totalTasks}</strong><small>All tracked work</small></div></article>
         <article className="kpi-card"><div className="kpi-icon success"><CheckCircle2 /></div><div><span>Completion rate</span><strong>{m.completionRate}%</strong><small>{m.completedTasks} completed</small></div></article>
         <article className="kpi-card"><div className="kpi-icon info"><Activity /></div><div><span>Active workload</span><strong>{m.activeTasks}</strong><small>{countValue(m.byStatus, "In Progress")} currently in progress</small></div></article>
-        <article className="kpi-card"><div className="kpi-icon danger"><AlertTriangle /></div><div><span>Risk queue</span><strong>{m.blockedTasks + m.overdueTasks}</strong><small>{m.blockedTasks} blocked · {m.overdueTasks} overdue</small></div></article>
+        <article className="kpi-card"><div className="kpi-icon danger"><AlertTriangle /></div><div><span>Risk queue</span><strong>{m.blockedTasks + m.overdueTasks}</strong><small>{m.blockedTasks} blocked Â· {m.overdueTasks} overdue</small></div></article>
         <article className="kpi-card"><div className="kpi-icon warning"><Target /></div><div><span>High-priority active</span><strong>{m.highPriorityActive}</strong><small>Requires management focus</small></div></article>
         <article className="kpi-card"><div className="kpi-icon"><CalendarClock /></div><div><span>Average age</span><strong>{m.averageDaysOpen}d</strong><small>Open task duration</small></div></article>
       </section>
@@ -350,7 +350,7 @@ export default function Dashboard() {
             {attention.length ? attention.map((task) => (
               <div className="attention-row" key={task.taskId}>
                 <div className="attention-rank" />
-                <div><strong>{task.taskName}</strong><span>{task.taskId} · {task.owner} · {task.daysOpen} days</span></div>
+                <div><strong>{task.taskName}</strong><span>{task.taskId} Â· {task.owner} Â· {task.daysOpen} days</span></div>
                 <span className={statusClass(task.status)}>{task.status}</span>
               </div>
             )) : <div className="empty-panel">No high-risk tasks detected.</div>}
@@ -402,9 +402,9 @@ export default function Dashboard() {
                       <td><span className={statusClass(task.status)}>{task.status}</span></td>
                       <td>{task.progress !== null ? <div className="progress-cell"><div><i style={{ width: `${task.progress}%` }}/></div><span>{task.progress}%</span></div> : <span className="muted">Not tracked</span>}</td>
                       <td><strong>{task.daysOpen}d</strong></td>
-                      <td className="next-action">{task.nextAction || "—"}</td>
+                      <td className="next-action">{task.nextAction || "â€”"}</td>
                     </tr>
-                    {isOpen ? <tr className="detail-row"><td colSpan={9}><div className="detail-grid"><div><span>Task brief</span><p>{task.taskBrief || "—"}</p></div><div><span>Business impact</span><p>{task.businessImpact || "—"}</p></div><div><span>Current limitation</span><p>{task.currentLimitation || "—"}</p></div><div><span>Output / deliverable</span><p>{task.outputDeliverable || "—"}</p></div><div><span>Current stack</span><p>{task.currentStackUsed || "—"}</p></div><div><span>Future scaling stack</span><p>{task.futureScalingStack || "—"}</p></div><div><span>Dates</span><p>Started: {formatDate(task.dateStarted)}<br/>Due: {formatDate(task.dueDate)}<br/>Completed: {formatDate(task.taskCompletedDate)}</p></div><div><span>Readiness & notes</span><p>{task.scaleReadiness}<br/>{task.notes || "No notes"}</p></div></div></td></tr> : null}
+                    {isOpen ? <tr className="detail-row"><td colSpan={9}><div className="detail-grid"><div><span>Task brief</span><p>{task.taskBrief || "â€”"}</p></div><div><span>Business impact</span><p>{task.businessImpact || "â€”"}</p></div><div><span>Current limitation</span><p>{task.currentLimitation || "â€”"}</p></div><div><span>Output / deliverable</span><p>{task.outputDeliverable || "â€”"}</p></div><div><span>Current stack</span><p>{task.currentStackUsed || "â€”"}</p></div><div><span>Future scaling stack</span><p>{task.futureScalingStack || "â€”"}</p></div><div><span>Dates</span><p>Started: {formatDate(task.dateStarted)}<br/>Due: {formatDate(task.dueDate)}<br/>Completed: {formatDate(task.taskCompletedDate)}</p></div><div><span>Readiness & notes</span><p>{task.scaleReadiness}<br/>{task.notes || "No notes"}</p></div></div></td></tr> : null}
                   </Fragment>
                 );
               })}
@@ -415,7 +415,8 @@ export default function Dashboard() {
         <div className="pagination"><span>Page {page} of {pageCount}</span><div><button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</button><button disabled={page >= pageCount} onClick={() => setPage((p) => p + 1)}>Next</button></div></div>
       </section>
 
-      <footer><span>LS Task Manager · Presentation layer only</span><span>Google Sheet remains the source of truth</span></footer>
+      <footer><span>LS Task Manager Â· Presentation layer only</span><span>Google Sheet remains the source of truth</span></footer>
     </main>
   );
 }
+
