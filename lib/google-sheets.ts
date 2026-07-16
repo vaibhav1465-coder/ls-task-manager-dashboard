@@ -1,4 +1,4 @@
-﻿import { GoogleAuth } from "google-auth-library";
+import { GoogleAuth } from "google-auth-library";
 import { buildDataHealth, buildMetrics } from "./metrics";
 import { rowsToTasks } from "./task-normalizer";
 import type { TaskApiResponse } from "../types/task";
@@ -76,6 +76,10 @@ export async function fetchTaskDashboard(force = false): Promise<TaskApiResponse
 
   const response = await googleSheetsRequest<{ values?: string[][] }>(valuesUrl, accessToken);
   const tasks = rowsToTasks(response.values ?? []);
+  if (tasks.length === 0) {
+    const rowCount = response.values?.length ?? 0;
+    throw new Error(`Google Sheet connected, but no Task Manager records were parsed from ${rowCount} rows. Confirm the header row includes Task ID, Task Name, Status, Owner or Priority.`);
+  }
 
   const data = {
     tasks,
