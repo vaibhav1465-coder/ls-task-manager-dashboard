@@ -1,100 +1,27 @@
-import { GoogleAuth } from "google-auth-library";
-import { buildDataHealth, buildMetrics } from "./metrics";
-import { rowsToTasks } from "./task-normalizer";
-import type { TaskApiResponse } from "../types/task";
-
-let memoryCache: {
-  expiresAt: number;
-  data: Omit<TaskApiResponse, "meta"> & {
-    meta: Omit<TaskApiResponse["meta"], "cacheState">;
-  };
-} | null = null;
-
-function getCredentials(): Record<string, unknown> {
-  const encoded = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64;
-  if (!encoded) throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_JSON_BASE64.");
-
-  try {
-    return JSON.parse(Buffer.from(encoded, "base64").toString("utf8")) as Record<string, unknown>;
-  } catch {
-    throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 is not valid base64-encoded JSON.");
-  }
+import { SignJWT, importPKCS8 } from "jose";
+import { buildMetrics, rowsToTasks } from "@/lib/task-data";
+import type { TaskApiResponse } from "@/types/task";
+let cache:{expires:number,data:TaskApiResponse}|null=null;
+type Credentials={client_email:string;private_key:string;token_uri?:string};
+function credentials():Credentials {
+  const encoded=process.env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64;
+  if(!encoded) throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_JSON_BASE64.");
+  try { const c=JSON.parse(Buffer.from(encoded,"base64").toString("utf8")) as Credentials; if(!c.client_email||!c.private_key) throw new Error(); return c; }
+  catch { throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 is not valid service-account JSON."); }
 }
-
-async function googleSheetsRequest<T>(url: string, accessToken: string): Promise<T> {
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-    cache: "no-store"
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Google Sheets API returned ${response.status}: ${body.slice(0, 500)}`);
-  }
-
-  return (await response.json()) as T;
+async function accessToken():Promise<string>{
+  const c=credentials(); const now=Math.floor(Date.now()/1000); const key=await importPKCS8(c.private_key,"RS256");
+  const assertion=await new SignJWT({scope:"https://www.googleapis.com/auth/spreadsheets.readonly"}).setProtectedHeader({alg:"RS256",typ:"JWT"}).setIssuer(c.client_email).setSubject(c.client_email).setAudience(c.token_uri||"https://oauth2.googleapis.com/token").setIssuedAt(now).setExpirationTime(now+3600).sign(key);
+  const body=new URLSearchParams({grant_type:"urn:ietf:params:oauth:grant-type:jwt-bearer",assertion});
+  const r=await fetch(c.token_uri||"https://oauth2.googleapis.com/token",{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body,cache:"no-store"});
+  const j=await r.json() as {access_token?:string;error_description?:string}; if(!r.ok||!j.access_token) throw new Error(j.error_description||"Google authentication failed."); return j.access_token;
 }
-
-export async function fetchTaskDashboard(force = false): Promise<TaskApiResponse> {
-  const ttl = Number(process.env.GOOGLE_SHEETS_CACHE_TTL_MS ?? 30000);
-  if (!force && memoryCache && memoryCache.expiresAt > Date.now()) {
-    return { ...memoryCache.data, meta: { ...memoryCache.data.meta, cacheState: "hit" } };
-  }
-
-  const spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID;
-  const sheetId = Number(process.env.GOOGLE_SHEET_GID ?? 0);
-
-  if (!spreadsheetId) throw new Error("Missing GOOGLE_SPREADSHEET_ID.");
-  if (!Number.isInteger(sheetId) || sheetId < 0) {
-    throw new Error("GOOGLE_SHEET_GID must be a valid numeric gid.");
-  }
-
-  const auth = new GoogleAuth({
-    credentials: getCredentials(),
-    scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"]
-  });
-  const accessToken = await auth.getAccessToken();
-  if (!accessToken) throw new Error("Google service account could not obtain an access token.");
-
-  const metadataUrl =
-    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}` +
-    `?fields=${encodeURIComponent("sheets.properties(sheetId,title)")}`;
-
-  const metadata = await googleSheetsRequest<{
-    sheets?: Array<{ properties?: { sheetId?: number; title?: string } }>;
-  }>(metadataUrl, accessToken);
-
-  const sheet = metadata.sheets?.find((item) => item.properties?.sheetId === sheetId);
-  const sheetTitle = sheet?.properties?.title;
-  if (!sheetTitle) throw new Error(`No sheet tab found for gid ${sheetId}.`);
-
-  const range = `'${sheetTitle.replace(/'/g, "''")}'!A:AZ`;
-  const valuesUrl =
-    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}` +
-    `/values/${encodeURIComponent(range)}` +
-    `?valueRenderOption=FORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`;
-
-  const response = await googleSheetsRequest<{ values?: string[][] }>(valuesUrl, accessToken);
-  const tasks = rowsToTasks(response.values ?? []);
-  if (tasks.length === 0) {
-    const rowCount = response.values?.length ?? 0;
-    throw new Error(`Google Sheet connected, but no Task Manager records were parsed from ${rowCount} rows. Confirm the header row includes Task ID, Task Name, Status, Owner or Priority.`);
-  }
-
-  const data = {
-    tasks,
-    metrics: buildMetrics(tasks),
-    health: buildDataHealth(tasks),
-    meta: {
-      spreadsheetId,
-      sheetId,
-      sheetTitle,
-      rowCount: tasks.length,
-      fetchedAt: new Date().toISOString(),
-      readOnly: true as const
-    }
-  };
-
-  memoryCache = { expiresAt: Date.now() + ttl, data };
-  return { ...data, meta: { ...data.meta, cacheState: "miss" } };
+async function googleJson(url:string,token:string){ const r=await fetch(url,{headers:{Authorization:`Bearer ${token}`},cache:"no-store"}); const j=await r.json(); if(!r.ok) throw new Error((j as any)?.error?.message||"Google Sheets API request failed."); return j; }
+export async function fetchDashboard(force=false):Promise<TaskApiResponse>{
+  const ttl=Number(process.env.GOOGLE_SHEETS_CACHE_TTL_MS||30000); if(!force&&cache&&cache.expires>Date.now()) return {...cache.data,meta:{...cache.data.meta,cacheState:"hit"}};
+  const spreadsheetId=process.env.GOOGLE_SPREADSHEET_ID||""; const gid=Number(process.env.GOOGLE_SHEET_GID||0); if(!spreadsheetId) throw new Error("Missing GOOGLE_SPREADSHEET_ID.");
+  const token=await accessToken(); const meta=await googleJson(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets.properties(sheetId,title)`,token) as any;
+  const sheet=meta.sheets?.find((s:any)=>s.properties?.sheetId===gid); const title=sheet?.properties?.title; if(!title) throw new Error(`No sheet tab found for gid ${gid}.`);
+  const range=encodeURIComponent(`'${String(title).replace(/'/g,"''")}'!A:AZ`); const valuesJson=await googleJson(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${range}?valueRenderOption=FORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`,token) as any;
+  const tasks=rowsToTasks((valuesJson.values||[]) as string[][]); const data:TaskApiResponse={tasks,metrics:buildMetrics(tasks),meta:{sheetTitle:title,rowCount:tasks.length,fetchedAt:new Date().toISOString(),cacheState:"miss",readOnly:true}}; cache={expires:Date.now()+ttl,data}; return data;
 }
