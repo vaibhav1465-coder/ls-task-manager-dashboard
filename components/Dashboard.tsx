@@ -1,27 +1,473 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, AlertTriangle, CalendarClock, CheckCircle2, Clock3, Download, Gauge, RefreshCw, Search, ShieldCheck, Sparkles, Users } from "lucide-react";
-import type { DashboardMetrics, Task, TaskApiResponse } from "@/types/task";
 
-const fmt=(n:number,suffix="")=>`${Number.isFinite(n)?n:0}${suffix}`;
-const entries=(o:Record<string,number>)=>Object.entries(o).sort((a,b)=>b[1]-a[1]);
-function MetricCard({label,value,sub,icon}:{label:string;value:string|number;sub:string;icon:React.ReactNode}){return <article className="metric-card"><div className="metric-icon">{icon}</div><div><p>{label}</p><strong>{value}</strong><span>{sub}</span></div></article>}
-function BarList({title,data,max=7}:{title:string;data:Record<string,number>;max?:number}){const list=entries(data).slice(0,max);const top=Math.max(...list.map(x=>x[1]),1);return <section className="panel"><div className="panel-head"><h3>{title}</h3><span>{list.reduce((a,b)=>a+b[1],0)} tasks</span></div><div className="bars">{list.length?list.map(([name,value])=><div className="bar-row" key={name}><div className="bar-label"><span>{name}</span><b>{value}</b></div><div className="bar-track"><i style={{width:`${Math.max(8,(value/top)*100)}%`}}/></div></div>):<p className="empty">No data available</p>}</div></section>}
-function Donut({metrics}:{metrics:DashboardMetrics}){const live=metrics.live,open=metrics.open,total=Math.max(metrics.total,1);const p=Math.round(live/total*100);return <section className="panel donut-panel"><div className="panel-head"><h3>Delivery Status</h3><span>Live vs open</span></div><div className="donut-wrap"><div className="donut" style={{background:`conic-gradient(#55f6c7 0 ${p}%,#7c6cff ${p}% 100%)`}}><div><strong>{p}%</strong><span>Live</span></div></div><div className="legend"><p><i className="live-dot"/>Live <b>{live}</b></p><p><i className="open-dot"/>Open <b>{open}</b></p><p><i className="delay-dot"/>Delayed <b>{metrics.delayed}</b></p></div></div></section>}
-function exportCsv(tasks:Task[]){const cols:[keyof Task,string][]=[["serial","#"],["taskType","Task Type"],["priority","Priorities"],["taskName","Task Name"],["taskDescription","Task Description"],["team","Team"],["maker","Maker"],["owner","Owner"],["checker","Checker"],["reportDate","Report Date"],["startDate","Start Date"],["eta","ETA"],["liveDate","Live Date"],["etaMissingReason","Reason if ETA missing"],["status","Status"],["comment","Comment if any"]]; const quote=(v:unknown)=>`"${String(v??"").replace(/"/g,'""')}"`; const csv=[cols.map(c=>quote(c[1])).join(","),...tasks.map(t=>cols.map(c=>quote(t[c[0]])).join(","))].join("\n"); const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));const a=document.createElement("a");a.href=url;a.download=`ls-task-manager-${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(url);}
-export default function Dashboard(){
- const [data,setData]=useState<TaskApiResponse|null>(null),[error,setError]=useState(""),[loading,setLoading]=useState(true),[query,setQuery]=useState(""),[status,setStatus]=useState("All"),[team,setTeam]=useState("All");
- const load=useCallback(async(force=false)=>{setLoading(true);setError("");try{const r=await fetch(`/api/tasks${force?"?force=1":""}`,{cache:"no-store"});const j=await r.json();if(!r.ok)throw new Error(j.error||"Unable to load dashboard");setData(j);}catch(e){setError(e instanceof Error?e.message:"Unable to load dashboard");}finally{setLoading(false)}},[]);
- useEffect(()=>{load();const id=setInterval(()=>load(),Number(process.env.NEXT_PUBLIC_REFRESH_INTERVAL_MS||30000));return()=>clearInterval(id)},[load]);
- const filtered=useMemo(()=>{if(!data)return[];const q=query.toLowerCase();return data.tasks.filter(t=>(status==="All"||t.status===status)&&(team==="All"||t.team===team)&&(!q||Object.values(t).some(v=>String(v??"").toLowerCase().includes(q))))},[data,query,status,team]);
- if(loading&&!data)return <main className="loading"><div className="loader"/><h2>Connecting to Google Sheets</h2><p>Building the live task intelligence view…</p></main>;
- if(error&&!data)return <main className="loading error-state"><AlertTriangle size={42}/><h2>Dashboard data could not load</h2><p>{error}</p><button onClick={()=>load(true)}>Try again</button></main>;
- if(!data)return null; const m=data.metrics; const statuses=["All",...Object.keys(m.byStatus)]; const teams=["All",...Object.keys(m.byTeam)];
- return <main className="dashboard-shell"><div className="aurora a1"/><div className="aurora a2"/><header className="topbar"><div><p className="eyebrow">LOKSATTA · LIVE OPERATIONS</p><h1>Task Manager <em>Command Center</em></h1><p className="subtitle">Google Sheet remains the source of truth. This dashboard is a read-only presentation layer.</p></div><div className="top-actions"><div className="sync-pill"><span/><div><b>Google Sheets Live</b><small>{data.meta.rowCount} rows · {new Date(data.meta.fetchedAt).toLocaleTimeString()}</small></div></div><button className="icon-btn" onClick={()=>load(true)} aria-label="Refresh"><RefreshCw size={18}/></button><form action="/api/auth/logout" method="post"><button className="ghost-btn">Sign out</button></form></div></header>
- <section className="metrics-grid"><MetricCard label="Total Tasks" value={m.total} sub="All tracked assignments" icon={<Activity/>}/><MetricCard label="Live Tasks" value={m.live} sub={`${fmt(m.onTimeDelivery,"%")} on-time delivery`} icon={<CheckCircle2/>}/><MetricCard label="Open Tasks" value={m.open} sub={`${m.dueThisWeek} due this week`} icon={<Clock3/>}/><MetricCard label="Delayed" value={m.delayed} sub={`${m.averageDelay} avg. delay days`} icon={<AlertTriangle/>}/><MetricCard label="ETA Coverage" value={fmt(m.etaAdherence,"%")} sub={`${m.missingEta} tasks missing ETA`} icon={<CalendarClock/>}/><MetricCard label="Turnaround" value={`${m.averageTurnaround}d`} sub="Average report-to-live" icon={<Gauge/>}/><MetricCard label="High Priority Open" value={m.highPriorityOpen} sub="Needs management attention" icon={<Sparkles/>}/><MetricCard label="Data Quality" value={fmt(m.dataQuality,"%")} sub="Required fields completed" icon={<ShieldCheck/>}/></section>
- <section className="visual-grid"><Donut metrics={m}/><section className="panel lifecycle"><div className="panel-head"><h3>Task Lifecycle</h3><span>Reported → Live</span></div>{Object.entries(m.lifecycle).map(([name,value],i)=>{const max=Math.max(m.lifecycle.reported,1);return <div className="stage" key={name}><div><span>{i+1}</span><b>{name.replace(/([A-Z])/g," $1")}</b><strong>{value}</strong></div><div className="stage-track"><i style={{width:`${Math.max(4,value/max*100)}%`}}/></div></div>})}</section><BarList title="Owner Workload" data={m.byOwner}/></section>
- <section className="visual-grid three"><BarList title="Team Distribution" data={m.byTeam}/><BarList title="Priority Mix" data={m.byPriority}/><BarList title="Task Types" data={m.byTaskType}/></section>
- <section className="visual-grid three"><BarList title="Maker Workload" data={m.byMaker}/><BarList title="Checker Workload" data={m.byChecker}/><BarList title="Delay / Missing ETA Reasons" data={m.byDelayReason}/></section>
- <section className="register panel"><div className="register-head"><div><p className="eyebrow">DETAILED OPERATIONS VIEW</p><h2>Task Register</h2><p>{filtered.length} of {data.tasks.length} tasks displayed</p></div><div className="controls"><label className="search"><Search size={17}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search tasks, owner, team…"/></label><select value={status} onChange={e=>setStatus(e.target.value)}>{statuses.map(x=><option key={x}>{x}</option>)}</select><select value={team} onChange={e=>setTeam(e.target.value)}>{teams.map(x=><option key={x}>{x}</option>)}</select><button className="download" onClick={()=>exportCsv(filtered)}><Download size={17}/>Export CSV</button></div></div><div className="table-wrap"><table><thead><tr>{["#","Task Type","Priority","Task Name","Description","Team","Maker","Owner","Checker","Report Date","Start Date","ETA","Live Date","Reason if ETA missing","Status","Comment"].map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{filtered.map(t=><tr key={`${t.rowNumber}-${t.serial}`} className={t.isDelayed?"risk-row":""}><td>{t.serial}</td><td>{t.taskType||"—"}</td><td><span className={`priority ${t.priority.toLowerCase()}`}>{t.priority||"—"}</span></td><td className="task-name">{t.taskName||"—"}</td><td>{t.taskDescription||"—"}</td><td>{t.team||"—"}</td><td>{t.maker||"—"}</td><td>{t.owner||"—"}</td><td>{t.checker||"—"}</td><td>{t.reportDate||"—"}</td><td>{t.startDate||"—"}</td><td>{t.eta||"—"}</td><td>{t.liveDate||"—"}</td><td>{t.etaMissingReason||"—"}</td><td><span className={`status ${t.isLive?"live":"open"}`}>{t.status}</span></td><td>{t.comment||"—"}</td></tr>)}</tbody></table></div></section>
- <footer><span><Users size={15}/> Sheet: {data.meta.sheetTitle}</span><span>Read-only · Cache {data.meta.cacheState}</span></footer></main>
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+type RawTask = Record<string, unknown>;
+
+type Task = {
+  id: string;
+  taskType: string;
+  priority: string;
+  taskName: string;
+  description: string;
+  team: string;
+  maker: string;
+  owner: string;
+  checker: string;
+  reportDate: string;
+  startDate: string;
+  eta: string;
+  liveDate: string;
+  etaReason: string;
+  status: string;
+  comment: string;
+};
+
+type ApiPayload = {
+  tasks?: RawTask[];
+  data?: RawTask[];
+  rows?: RawTask[];
+  meta?: Record<string, unknown>;
+  error?: string;
+};
+
+const REFRESH_MS = Number(process.env.NEXT_PUBLIC_REFRESH_INTERVAL_MS || 30000);
+
+const aliases: Record<keyof Task, string[]> = {
+  id: ["#", "id", "task id", "taskid"],
+  taskType: ["task type", "type", "tasktype"],
+  priority: ["priorities", "priority", "prio"],
+  taskName: ["task name", "task", "name", "title"],
+  description: ["task description", "description", "brief"],
+  team: ["team"],
+  maker: ["maker", "created by", "assignee"],
+  owner: ["owner"],
+  checker: ["checker", "reviewer", "approver"],
+  reportDate: ["report date", "reported date", "reportdate"],
+  startDate: ["start date", "startdate"],
+  eta: ["eta", "due date", "deadline"],
+  liveDate: ["live date", "completed date", "completion date", "livedate"],
+  etaReason: ["reason if eta missing", "eta reason", "delay reason", "reason"],
+  status: ["status", "task status"],
+  comment: ["comment if any", "comment", "comments", "notes"],
+};
+
+const cleanKey = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+
+const pick = (row: RawTask, names: string[]) => {
+  const entries = Object.entries(row);
+  for (const name of names) {
+    const match = entries.find(([key]) => cleanKey(key) === cleanKey(name));
+    if (match && match[1] !== null && match[1] !== undefined) return String(match[1]).trim();
+  }
+  return "";
+};
+
+const normalizeTask = (row: RawTask, index: number): Task => ({
+  id: pick(row, aliases.id) || String(index + 1),
+  taskType: pick(row, aliases.taskType) || "Not specified",
+  priority: pick(row, aliases.priority) || "Not specified",
+  taskName: pick(row, aliases.taskName) || `Task ${index + 1}`,
+  description: pick(row, aliases.description),
+  team: pick(row, aliases.team) || "Not specified",
+  maker: pick(row, aliases.maker) || "Not specified",
+  owner: pick(row, aliases.owner) || "Not specified",
+  checker: pick(row, aliases.checker) || "Not specified",
+  reportDate: pick(row, aliases.reportDate),
+  startDate: pick(row, aliases.startDate),
+  eta: pick(row, aliases.eta),
+  liveDate: pick(row, aliases.liveDate),
+  etaReason: pick(row, aliases.etaReason),
+  status: pick(row, aliases.status) || "Not specified",
+  comment: pick(row, aliases.comment),
+});
+
+const parseDate = (value: string): Date | null => {
+  if (!value) return null;
+  const direct = new Date(value);
+  if (!Number.isNaN(direct.getTime())) return direct;
+  const match = value.match(/^(\d{1,2})[\/\-\s](\d{1,2})[\/\-\s](\d{4})$/);
+  if (match) {
+    const date = new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  return null;
+};
+
+const isLive = (task: Task) => {
+  const status = cleanKey(task.status);
+  return status === "live" || status === "completed" || status === "done" || Boolean(task.liveDate);
+};
+
+const isOpen = (task: Task) => !isLive(task);
+
+const isDelayed = (task: Task) => {
+  const eta = parseDate(task.eta);
+  const live = parseDate(task.liveDate);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (!eta) return false;
+  if (live) return live.getTime() > eta.getTime();
+  return isOpen(task) && today.getTime() > eta.getTime();
+};
+
+const daysBetween = (a: Date | null, b: Date | null) => {
+  if (!a || !b) return null;
+  return Math.max(0, Math.round((b.getTime() - a.getTime()) / 86400000));
+};
+
+const countBy = (tasks: Task[], field: keyof Task) => {
+  const map = new Map<string, number>();
+  tasks.forEach((task) => {
+    const value = task[field] || "Not specified";
+    map.set(value, (map.get(value) || 0) + 1);
+  });
+  return [...map.entries()].sort((a, b) => b[1] - a[1]);
+};
+
+const pct = (part: number, total: number) => (total ? Math.round((part / total) * 100) : 0);
+
+function AnimatedNumber({ value, suffix = "" }: { value: number; suffix?: string }) {
+  const [display, setDisplay] = useState(0);
+  useEffect(() => {
+    const start = performance.now();
+    const duration = 600;
+    let frame = 0;
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - start) / duration);
+      setDisplay(Math.round(value * (1 - Math.pow(1 - progress, 3))));
+      if (progress < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [value]);
+  return <>{display}{suffix}</>;
+}
+
+function MiniBars({ items, total }: { items: [string, number][]; total: number }) {
+  return (
+    <div className="mini-bars">
+      {items.slice(0, 8).map(([label, value]) => (
+        <div className="mini-bar-row" key={label}>
+          <div className="mini-bar-head">
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </div>
+          <div className="mini-bar-track">
+            <span style={{ width: `${Math.max(5, pct(value, total))}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function Dashboard() {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [updatedAt, setUpdatedAt] = useState("");
+  const [search, setSearch] = useState("");
+  const [ownerFilter, setOwnerFilter] = useState("All");
+  const [teamFilter, setTeamFilter] = useState("All");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [priorityFilter, setPriorityFilter] = useState("All");
+  const [dateFilter, setDateFilter] = useState("All");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/tasks", { cache: "no-store" });
+      const payload = (await response.json()) as ApiPayload;
+      if (!response.ok) throw new Error(payload.error || "Unable to load dashboard data");
+      const raw = payload.tasks || payload.data || payload.rows || [];
+      setTasks(raw.map(normalizeTask));
+      setUpdatedAt(new Date().toLocaleTimeString());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load dashboard data");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const interval = window.setInterval(load, REFRESH_MS);
+    return () => window.clearInterval(interval);
+  }, [load]);
+
+  const metrics = useMemo(() => {
+    const total = tasks.length;
+    const live = tasks.filter(isLive).length;
+    const open = tasks.filter(isOpen).length;
+    const delayed = tasks.filter(isDelayed).length;
+    const etaAssigned = tasks.filter((task) => Boolean(task.eta)).length;
+    const onTime = tasks.filter((task) => {
+      const eta = parseDate(task.eta);
+      const liveDate = parseDate(task.liveDate);
+      return eta && liveDate && liveDate.getTime() <= eta.getTime();
+    }).length;
+    const completedWithEta = tasks.filter((task) => parseDate(task.eta) && parseDate(task.liveDate)).length;
+    const turnaround = tasks
+      .map((task) => daysBetween(parseDate(task.reportDate), parseDate(task.liveDate)))
+      .filter((value): value is number => value !== null);
+    const avgTurnaround = turnaround.length
+      ? Math.round(turnaround.reduce((sum, value) => sum + value, 0) / turnaround.length)
+      : 0;
+    const dueSoon = tasks.filter((task) => {
+      const eta = parseDate(task.eta);
+      if (!eta || isLive(task)) return false;
+      const diff = daysBetween(new Date(), eta);
+      return diff !== null && diff <= 7;
+    }).length;
+    const highOpen = tasks.filter((task) => {
+      const p = cleanKey(task.priority);
+      return isOpen(task) && ["high", "urgent", "p0", "p1", "1"].includes(p);
+    }).length;
+    const requiredFields = tasks.length * 8;
+    const filledFields = tasks.reduce((sum, task) => {
+      const fields = [task.taskName, task.team, task.owner, task.reportDate, task.startDate, task.eta, task.status, task.checker];
+      return sum + fields.filter(Boolean).length;
+    }, 0);
+    const dataQuality = requiredFields ? Math.round((filledFields / requiredFields) * 100) : 0;
+    const health = Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(
+          pct(live, total) * 0.3 +
+          pct(onTime, completedWithEta || 1) * 0.3 +
+          pct(etaAssigned, total) * 0.2 +
+          dataQuality * 0.2 -
+          pct(delayed, total) * 0.25
+        )
+      )
+    );
+    return { total, live, open, delayed, etaAssigned, onTime, completedWithEta, avgTurnaround, dueSoon, highOpen, dataQuality, health };
+  }, [tasks]);
+
+  const ownerRows = useMemo(() => countBy(tasks, "owner"), [tasks]);
+  const teamRows = useMemo(() => countBy(tasks, "team"), [tasks]);
+  const priorityRows = useMemo(() => countBy(tasks, "priority"), [tasks]);
+  const typeRows = useMemo(() => countBy(tasks, "taskType"), [tasks]);
+  const delayRows = useMemo(() => {
+    const delayed = tasks.filter((task) => isDelayed(task) || task.etaReason);
+    return countBy(delayed, "etaReason").map(([label, value]) => [label || "Not specified", value] as [string, number]);
+  }, [tasks]);
+
+  const lifecycle = useMemo(() => [
+    ["Reported", tasks.filter((task) => Boolean(task.reportDate)).length],
+    ["Started", tasks.filter((task) => Boolean(task.startDate)).length],
+    ["ETA Assigned", tasks.filter((task) => Boolean(task.eta)).length],
+    ["Live", tasks.filter(isLive).length],
+  ] as [string, number][], [tasks]);
+
+  const snapshot = useMemo(() => {
+    const capacity = ownerRows.length && ownerRows[0][1] <= Math.max(2, Math.ceil(metrics.total / Math.max(1, ownerRows.length)) * 1.4)
+      ? "Balanced"
+      : "Concentrated";
+    const healthLabel = metrics.health >= 85 ? "Excellent" : metrics.health >= 70 ? "Good" : metrics.health >= 50 ? "Needs attention" : "At risk";
+    return [
+      `${metrics.live} live task${metrics.live === 1 ? "" : "s"}`,
+      `${metrics.delayed} delayed task${metrics.delayed === 1 ? "" : "s"}`,
+      `Delivery health: ${healthLabel}`,
+      `Team capacity: ${capacity}`,
+      `${metrics.highOpen + metrics.delayed} management risk${metrics.highOpen + metrics.delayed === 1 ? "" : "s"}`,
+    ];
+  }, [metrics, ownerRows]);
+
+  const options = (field: keyof Task) => ["All", ...countBy(tasks, field).map(([value]) => value)];
+
+  const filtered = useMemo(() => {
+    const now = new Date();
+    return tasks.filter((task) => {
+      const haystack = Object.values(task).join(" ").toLowerCase();
+      if (search && !haystack.includes(search.toLowerCase())) return false;
+      if (ownerFilter !== "All" && task.owner !== ownerFilter) return false;
+      if (teamFilter !== "All" && task.team !== teamFilter) return false;
+      if (statusFilter !== "All" && task.status !== statusFilter) return false;
+      if (priorityFilter !== "All" && task.priority !== priorityFilter) return false;
+      if (dateFilter !== "All") {
+        const report = parseDate(task.reportDate);
+        if (!report) return false;
+        const diff = Math.floor((now.getTime() - report.getTime()) / 86400000);
+        if (dateFilter === "7d" && diff > 7) return false;
+        if (dateFilter === "30d" && diff > 30) return false;
+        if (dateFilter === "90d" && diff > 90) return false;
+      }
+      return true;
+    });
+  }, [tasks, search, ownerFilter, teamFilter, statusFilter, priorityFilter, dateFilter]);
+
+  const exportCsv = () => {
+    const headers = ["#", "Task Type", "Priority", "Task Name", "Task Description", "Team", "Maker", "Owner", "Checker", "Report Date", "Start Date", "ETA", "Live Date", "Reason if ETA missing", "Status", "Comment"];
+    const rows = filtered.map((task) => [
+      task.id, task.taskType, task.priority, task.taskName, task.description, task.team, task.maker, task.owner, task.checker,
+      task.reportDate, task.startDate, task.eta, task.liveDate, task.etaReason, task.status, task.comment,
+    ]);
+    const csv = [headers, ...rows].map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "ls-task-manager.csv";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  if (loading && !tasks.length) {
+    return <main className="command-center"><div className="loading-card">Loading Task Manager Command Centerâ€¦</div></main>;
+  }
+
+  return (
+    <main className="command-center">
+      <div className="ambient ambient-one" />
+      <div className="ambient ambient-two" />
+
+      <header className="hero">
+        <div>
+          <div className="eyebrow">LOKSATTA Â· LIVE OPERATIONS</div>
+          <h1>Task Manager <span>Command Center</span></h1>
+          <p>Google Sheet remains the source of truth. This dashboard is a read-only executive presentation layer.</p>
+        </div>
+        <div className="hero-actions">
+          <div className="live-pill"><i /> Google Sheets Live <small>{tasks.length} rows Â· {updatedAt || "syncing"}</small></div>
+          <button className="icon-btn" onClick={load} aria-label="Refresh">â†»</button>
+          <button className="signout-btn" onClick={() => { window.location.href = "/api/auth/logout"; }}>Sign out</button>
+        </div>
+      </header>
+
+      {error && <div className="error-banner">{error}</div>}
+
+      <section className="snapshot-card">
+        <div>
+          <div className="eyebrow">TODAY'S SNAPSHOT</div>
+          <h2>Executive Summary</h2>
+        </div>
+        <div className="snapshot-grid">
+          {snapshot.map((item, index) => <div key={item} className={`snapshot-item snapshot-${index}`}>âœ“ {item}</div>)}
+        </div>
+      </section>
+
+      <section className="kpi-grid">
+        {[
+          ["Total Tasks", metrics.total, "", "All tracked assignments", "pulse"],
+          ["Live Tasks", metrics.live, "", `${pct(metrics.onTime, metrics.completedWithEta || 1)}% on-time delivery`, "check"],
+          ["Open Tasks", metrics.open, "", `${metrics.dueSoon} due this week`, "clock"],
+          ["Delayed", metrics.delayed, "", "Needs delivery attention", "alert"],
+          ["ETA Coverage", pct(metrics.etaAssigned, metrics.total), "%", `${metrics.total - metrics.etaAssigned} tasks missing ETA`, "calendar"],
+          ["Turnaround", metrics.avgTurnaround, "d", "Average report-to-live", "speed"],
+          ["High Priority Open", metrics.highOpen, "", "Needs management attention", "spark"],
+          ["Operations Health", metrics.health, "%", `Data quality ${metrics.dataQuality}%`, "shield"],
+        ].map(([label, value, suffix, hint, icon]) => (
+          <article className="kpi-card" key={String(label)}>
+            <div className={`kpi-icon ${icon}`}>{String(icon).slice(0, 1).toUpperCase()}</div>
+            <div>
+              <span>{label}</span>
+              <strong><AnimatedNumber value={Number(value)} suffix={String(suffix)} /></strong>
+              <small>{hint}</small>
+            </div>
+            <div className="sparkline"><b /><b /><b /><b /><b /></div>
+          </article>
+        ))}
+      </section>
+
+      <section className="primary-grid">
+        <article className="panel health-panel">
+          <div className="panel-head"><h3>Operations Health</h3><span>Execution score</span></div>
+          <div className="health-wrap">
+            <div className="health-ring" style={{ ["--score" as string]: `${metrics.health * 3.6}deg` }}>
+              <div><strong>{metrics.health}%</strong><span>{metrics.health >= 85 ? "Excellent" : metrics.health >= 70 ? "Good" : "Needs attention"}</span></div>
+            </div>
+            <div className="health-stars">{"â˜…â˜…â˜…â˜…â˜…".slice(0, Math.max(1, Math.round(metrics.health / 20)))}</div>
+          </div>
+        </article>
+
+        <article className="panel lifecycle-panel">
+          <div className="panel-head"><h3>Delivery Timeline</h3><span>Reported â†’ Live</span></div>
+          <div className="lifecycle">
+            {lifecycle.map(([label, value], index) => (
+              <div className="life-step" key={label}>
+                <span className="step-num">{index + 1}</span>
+                <div><b>{label}</b><small>{value} tasks</small></div>
+                <div className="life-track"><span style={{ width: `${pct(value, metrics.total)}%` }} /></div>
+                {index < lifecycle.length - 1 && <i>â†“</i>}
+              </div>
+            ))}
+          </div>
+        </article>
+
+        <article className="panel">
+          <div className="panel-head"><h3>Owner Heatmap</h3><span>{metrics.total} tasks</span></div>
+          <div className="owner-cards">
+            {ownerRows.slice(0, 6).map(([owner, total]) => {
+              const ownerTasks = tasks.filter((task) => task.owner === owner);
+              const active = ownerTasks.filter(isOpen).length;
+              const delayed = ownerTasks.filter(isDelayed).length;
+              const eta = ownerTasks.filter((task) => Boolean(task.eta)).length;
+              return (
+                <div className="owner-card" key={owner}>
+                  <div><b>{owner}</b><strong>{total}</strong></div>
+                  <div className="owner-meter"><span style={{ width: `${pct(total, metrics.total)}%` }} /></div>
+                  <small>{active} active Â· {delayed} delayed Â· {pct(eta, total)}% ETA</small>
+                </div>
+              );
+            })}
+          </div>
+        </article>
+      </section>
+
+      <section className="secondary-grid">
+        <article className="panel"><div className="panel-head"><h3>Team Distribution</h3><span>{metrics.total} tasks</span></div><MiniBars items={teamRows} total={metrics.total} /></article>
+        <article className="panel"><div className="panel-head"><h3>Priority Mix</h3><span>{metrics.total} tasks</span></div><MiniBars items={priorityRows} total={metrics.total} /></article>
+        <article className="panel"><div className="panel-head"><h3>Task Types</h3><span>{metrics.total} tasks</span></div><MiniBars items={typeRows} total={metrics.total} /></article>
+        <article className="panel wide"><div className="panel-head"><h3>Delay Analytics</h3><span>Reasons and concentration</span></div><MiniBars items={delayRows.length ? delayRows : [["No delay reasons", 0]]} total={Math.max(1, delayRows.reduce((sum, [, value]) => sum + value, 0))} /></article>
+      </section>
+
+      <section className="register panel">
+        <div className="register-head">
+          <div><div className="eyebrow">DETAILED OPERATIONS VIEW</div><h2>Task Register</h2><p>{filtered.length} of {tasks.length} tasks displayed</p></div>
+          <div className="filters">
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search tasks, owner, teamâ€¦" />
+            <select value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)}>{options("owner").map((value) => <option key={value}>{value}</option>)}</select>
+            <select value={teamFilter} onChange={(event) => setTeamFilter(event.target.value)}>{options("team").map((value) => <option key={value}>{value}</option>)}</select>
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>{options("status").map((value) => <option key={value}>{value}</option>)}</select>
+            <select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}>{options("priority").map((value) => <option key={value}>{value}</option>)}</select>
+            <select value={dateFilter} onChange={(event) => setDateFilter(event.target.value)}>
+              <option value="All">All dates</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="90d">Last 90 days</option>
+            </select>
+            <button onClick={exportCsv}>Export CSV</button>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                {["#", "Task Type", "Priority", "Task Name", "Description", "Team", "Maker", "Owner", "Checker", "Report Date", "Start Date", "ETA", "Live Date", "Reason if ETA missing", "Status", "Comment"].map((header) => <th key={header}>{header}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((task) => (
+                <tr key={`${task.id}-${task.taskName}`}>
+                  <td>{task.id}</td><td>{task.taskType}</td><td><span className="priority-pill">{task.priority}</span></td>
+                  <td><strong>{task.taskName}</strong></td><td>{task.description || "â€”"}</td><td>{task.team}</td><td>{task.maker}</td>
+                  <td>{task.owner}</td><td>{task.checker}</td><td>{task.reportDate || "â€”"}</td><td>{task.startDate || "â€”"}</td>
+                  <td>{task.eta || "â€”"}</td><td>{task.liveDate || "â€”"}</td><td>{task.etaReason || "â€”"}</td>
+                  <td><span className={`status-pill ${isLive(task) ? "live" : isDelayed(task) ? "delayed" : "open"}`}>{task.status}</span></td>
+                  <td>{task.comment || "â€”"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer><span>Sheet: Task Manager</span><span>Read-only Â· Auto refresh {Math.round(REFRESH_MS / 1000)}s</span></footer>
+    </main>
+  );
 }
