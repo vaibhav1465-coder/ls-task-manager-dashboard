@@ -1,44 +1,47 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-
-export type EditableTask = {
-  rowNumber: number;
-  id: string;
-  taskType: string;
-  priority: string;
-  taskName: string;
-  description: string;
-  team: string;
-  maker: string;
-  owner: string;
-  checker: string;
-  reportDate: string;
-  startDate: string;
-  eta: string;
-  liveDate: string;
-  etaReason: string;
-  status: string;
-  comment: string;
-};
+import type { Task } from "@/types/task";
 
 type Props = {
-  task: EditableTask | null;
+  task: Task | null;
   onClose: () => void;
   onSaved: () => void | Promise<void>;
 };
 
-type EditableKey = Exclude<keyof EditableTask, "rowNumber">;
+type EditableStringField =
+  | "serial"
+  | "taskType"
+  | "priority"
+  | "taskName"
+  | "taskDescription"
+  | "team"
+  | "maker"
+  | "owner"
+  | "checker"
+  | "reportDate"
+  | "startDate"
+  | "eta"
+  | "liveDate"
+  | "etaMissingReason"
+  | "status"
+  | "comment";
 
 const fields: Array<{
-  key: EditableKey;
+  key: EditableStringField;
   label: string;
   wide?: boolean;
+  textarea?: boolean;
 }> = [
-  { key: "id", label: "#" },
+  { key: "serial", label: "#" },
   { key: "taskType", label: "Task Type" },
   { key: "taskName", label: "Task Name" },
-  { key: "description", label: "Task Description", wide: true },
+  {
+    key: "taskDescription",
+    label: "Task Description",
+    wide: true,
+    textarea: true,
+  },
   { key: "team", label: "Team" },
   { key: "maker", label: "Maker" },
   { key: "owner", label: "Owner" },
@@ -47,16 +50,22 @@ const fields: Array<{
   { key: "startDate", label: "Start Date" },
   { key: "eta", label: "ETA" },
   { key: "liveDate", label: "Live Date" },
-  { key: "etaReason", label: "Reason if ETA missing", wide: true },
-  { key: "comment", label: "Comment if any", wide: true },
+  {
+    key: "etaMissingReason",
+    label: "Reason if ETA missing",
+    wide: true,
+    textarea: true,
+  },
+  {
+    key: "comment",
+    label: "Comment if any",
+    wide: true,
+    textarea: true,
+  },
 ];
 
-export default function TaskEditor({
-  task,
-  onClose,
-  onSaved,
-}: Props) {
-  const [form, setForm] = useState<EditableTask | null>(task);
+export default function TaskEditor({ task, onClose, onSaved }: Props) {
+  const [form, setForm] = useState<Task | null>(task);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -67,9 +76,14 @@ export default function TaskEditor({
 
   if (!task || !form) return null;
 
-  const update = (key: EditableKey, value: string) => {
+  const update = (field: EditableStringField, value: string) => {
     setForm((current) =>
-      current ? { ...current, [key]: value } : current,
+      current
+        ? {
+            ...current,
+            [field]: value,
+          }
+        : current,
     );
   };
 
@@ -87,11 +101,11 @@ export default function TaskEditor({
         body: JSON.stringify({
           rowNumber: form.rowNumber,
           task: {
-            serial: form.id,
+            serial: form.serial,
             taskType: form.taskType,
             priority: form.priority,
             taskName: form.taskName,
-            taskDescription: form.description,
+            taskDescription: form.taskDescription,
             team: form.team,
             maker: form.maker,
             owner: form.owner,
@@ -100,14 +114,16 @@ export default function TaskEditor({
             startDate: form.startDate,
             eta: form.eta,
             liveDate: form.liveDate,
-            etaMissingReason: form.etaReason,
+            etaMissingReason: form.etaMissingReason,
             status: form.status,
             comment: form.comment,
           },
         }),
       });
 
-      const payload = await response.json();
+      const payload = (await response.json()) as {
+        error?: string;
+      };
 
       if (!response.ok) {
         throw new Error(
@@ -118,9 +134,7 @@ export default function TaskEditor({
       await onSaved();
     } catch (caught) {
       setError(
-        caught instanceof Error
-          ? caught.message
-          : "Unable to save task.",
+        caught instanceof Error ? caught.message : "Unable to save task.",
       );
     } finally {
       setSaving(false);
@@ -140,13 +154,13 @@ export default function TaskEditor({
         aria-labelledby="task-editor-title"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="task-editor-head">
+        <header className="task-editor-head">
           <div>
             <span>GOOGLE SHEETS TWO-WAY SYNC</span>
             <h2 id="task-editor-title">Edit Task</h2>
             <p>
-              Saving here updates row {form.rowNumber} in the connected
-              Task Manager tab.
+              Saving updates row {form.rowNumber} in the connected Task Manager
+              tab.
             </p>
           </div>
 
@@ -154,11 +168,11 @@ export default function TaskEditor({
             type="button"
             className="task-editor-close"
             onClick={onClose}
-            aria-label="Close"
+            aria-label="Close editor"
           >
-            X
+            ×
           </button>
-        </div>
+        </header>
 
         <form onSubmit={save}>
           <div className="task-editor-grid">
@@ -166,14 +180,12 @@ export default function TaskEditor({
               <span>Priority</span>
               <select
                 value={form.priority}
-                onChange={(event) =>
-                  update("priority", event.target.value)
-                }
+                onChange={(event) => update("priority", event.target.value)}
               >
                 <option value="">Select priority</option>
-                <option>High</option>
-                <option>Medium</option>
-                <option>Low</option>
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
               </select>
             </label>
 
@@ -181,14 +193,12 @@ export default function TaskEditor({
               <span>Status</span>
               <select
                 value={form.status}
-                onChange={(event) =>
-                  update("status", event.target.value)
-                }
+                onChange={(event) => update("status", event.target.value)}
               >
-                <option>Pending</option>
-                <option>WIP</option>
-                <option>Completed</option>
-                <option>Blocked</option>
+                <option value="Pending">Pending</option>
+                <option value="WIP">WIP</option>
+                <option value="Completed">Completed</option>
+                <option value="Blocked">Blocked</option>
               </select>
             </label>
 
@@ -198,8 +208,7 @@ export default function TaskEditor({
                 className={field.wide ? "task-editor-wide" : ""}
               >
                 <span>{field.label}</span>
-
-                {field.wide ? (
+                {field.textarea ? (
                   <textarea
                     rows={3}
                     value={form[field.key]}
@@ -219,23 +228,20 @@ export default function TaskEditor({
             ))}
           </div>
 
-          {error && (
-            <div className="task-editor-error">{error}</div>
-          )}
+          {error ? <div className="task-editor-error">{error}</div> : null}
 
           <div className="task-editor-actions">
             <button
               type="button"
-              className="task-editor-cancel"
+              className="secondary-button"
               onClick={onClose}
               disabled={saving}
             >
               Cancel
             </button>
-
             <button
               type="submit"
-              className="task-editor-save"
+              className="primary-button"
               disabled={saving}
             >
               {saving ? "Saving..." : "Save to Google Sheet"}

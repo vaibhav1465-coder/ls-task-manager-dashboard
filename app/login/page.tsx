@@ -1,1 +1,62 @@
-export default async function Login({searchParams}:{searchParams:Promise<{error?:string}>}){ const q=await searchParams; return <main className="login-shell"><section className="login-card"><div className="login-orb"/><p className="eyebrow">LOKSATTA OPERATIONS</p><h1>Task Manager Dashboard</h1><p className="muted">Secure presentation layer connected to the live Google Sheet.</p>{q.error&&<div className="login-error">{q.error==="config"?"Login configuration is incomplete.":"Incorrect username or password."}</div>}<form action="/api/auth/login" method="post"><label>Username<input name="username" autoComplete="username" required/></label><label>Password<input name="password" type="password" autoComplete="current-password" required/></label><button type="submit">Open Dashboard</button></form></section></main> }
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const query = await searchParams;
+
+  return (
+    <main className="login-shell">
+      <section className="login-card">
+        <span className="eyebrow">
+          LOKSATTA OPERATIONS
+        </span>
+        <h1>Task Manager Dashboard</h1>
+        <p>
+          Secure operations dashboard connected to the
+          live Google Sheet.
+        </p>
+
+        {query.error ? (
+          <div className="login-error">
+            {query.error === "config"
+              ? "Login configuration is incomplete."
+              : "Incorrect username or password."}
+          </div>
+        ) : null}
+
+        <form
+          action="/api/auth/login"
+          method="post"
+          className="login-form"
+        >
+          <label>
+            <span>Username</span>
+            <input
+              name="username"
+              autoComplete="username"
+              required
+            />
+          </label>
+
+          <label>
+            <span>Password</span>
+            <input
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+            />
+          </label>
+
+          <button
+            className="primary-button"
+            type="submit"
+          >
+            Open Dashboard
+          </button>
+        </form>
+      </section>
+    </main>
+  );
+}

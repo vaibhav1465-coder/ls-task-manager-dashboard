@@ -49,7 +49,12 @@ export type DashboardMetrics = {
   byChecker: Record<string, number>;
   byTaskType: Record<string, number>;
   byDelayReason: Record<string, number>;
-  lifecycle: { reported: number; started: number; etaAssigned: number; live: number };
+  lifecycle: {
+    reported: number;
+    started: number;
+    etaAssigned: number;
+    live: number;
+  };
 };
 
 export type TaskApiResponse = {

@@ -6,8 +6,6 @@ node_modules/
 .env.*.local
 !.env.example
 *.tsbuildinfo
-tsconfig.tsbuildinfo
-*.bundle
 package-lock.json.internal-registry-backup
-*-backup-*/
 .*-backup-*/
+*-backup-*/

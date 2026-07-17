@@ -25,16 +25,14 @@ export type TaskWriteInput = {
   comment: string;
 };
 
-const aliases: Record<keyof TaskWriteInput, string[]> = {
+type WritableField = keyof TaskWriteInput;
+
+const aliases: Record<WritableField, string[]> = {
   serial: ["#", "serial", "sr no", "sno"],
   taskType: ["task type", "tasktype", "type"],
   priority: ["priorities", "priority"],
   taskName: ["task name", "taskname", "task"],
-  taskDescription: [
-    "task description",
-    "taskdescription",
-    "description",
-  ],
+  taskDescription: ["task description", "taskdescription", "description"],
   team: ["team"],
   maker: ["maker"],
   owner: ["owner"],
@@ -42,39 +40,29 @@ const aliases: Record<keyof TaskWriteInput, string[]> = {
   reportDate: ["report date", "reportdate"],
   startDate: ["start date", "startdate"],
   eta: ["eta", "due date", "duedate"],
-  liveDate: ["live date", "livedate", "completed date"],
+  liveDate: ["live date", "livedate", "completed date", "completion date"],
   etaMissingReason: [
     "reason if eta missing",
     "reasonifetamissing",
     "eta missing reason",
+    "delay reason",
   ],
-  status: ["status"],
-  comment: [
-    "comment if any",
-    "commentifany",
-    "comment",
-    "comments",
-  ],
+  status: ["status", "task status"],
+  comment: ["comment if any", "commentifany", "comment", "comments"],
 };
 
-function clean(value: unknown) {
+function clean(value: unknown): string {
   return String(value ?? "").trim();
 }
 
-function key(value: string) {
-  return clean(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "");
+function key(value: string): string {
+  return clean(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
 function getCredentials(): Credentials {
-  const encoded =
-    process.env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64;
-
+  const encoded = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64;
   if (!encoded) {
-    throw new Error(
-      "Missing GOOGLE_SERVICE_ACCOUNT_JSON_BASE64.",
-    );
+    throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_JSON_BASE64.");
   }
 
   try {
@@ -83,38 +71,30 @@ function getCredentials(): Credentials {
     ) as Credentials;
 
     if (!parsed.client_email || !parsed.private_key) {
-      throw new Error();
+      throw new Error("Required service-account fields are missing.");
     }
 
     return parsed;
   } catch {
     throw new Error(
-      "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 is invalid.",
+      "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 is not valid service-account JSON.",
     );
   }
 }
 
-async function getAccessToken() {
-  const account = getCredentials();
+async function getAccessToken(): Promise<string> {
+  const credentials = getCredentials();
   const now = Math.floor(Date.now() / 1000);
-  const privateKey = await importPKCS8(
-    account.private_key,
-    "RS256",
-  );
-
   const tokenUrl =
-    account.token_uri ||
-    "https://oauth2.googleapis.com/token";
+    credentials.token_uri || "https://oauth2.googleapis.com/token";
+  const privateKey = await importPKCS8(credentials.private_key, "RS256");
 
   const assertion = await new SignJWT({
     scope: "https://www.googleapis.com/auth/spreadsheets",
   })
-    .setProtectedHeader({
-      alg: "RS256",
-      typ: "JWT",
-    })
-    .setIssuer(account.client_email)
-    .setSubject(account.client_email)
+    .setProtectedHeader({ alg: "RS256", typ: "JWT" })
+    .setIssuer(credentials.client_email)
+    .setSubject(credentials.client_email)
     .setAudience(tokenUrl)
     .setIssuedAt(now)
     .setExpirationTime(now + 3600)
@@ -126,8 +106,7 @@ async function getAccessToken() {
       "content-type": "application/x-www-form-urlencoded",
     },
     body: new URLSearchParams({
-      grant_type:
-        "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
       assertion,
     }),
     cache: "no-store",
@@ -140,75 +119,63 @@ async function getAccessToken() {
 
   if (!response.ok || !payload.access_token) {
     throw new Error(
-      payload.error_description ||
-        "Google authentication failed.",
+      payload.error_description || "Google authentication failed.",
     );
   }
 
   return payload.access_token;
 }
 
-async function googleRequest(
+async function googleRequest<T>(
   url: string,
-  token: string,
+  accessToken: string,
   init: RequestInit = {},
-) {
+): Promise<T> {
   const response = await fetch(url, {
     ...init,
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${accessToken}`,
       "content-type": "application/json",
       ...(init.headers || {}),
     },
     cache: "no-store",
   });
 
-  const payload = await response.json();
+  const payload = (await response.json()) as T & {
+    error?: { message?: string };
+  };
 
   if (!response.ok) {
     throw new Error(
-      (
-        payload as {
-          error?: {
-            message?: string;
-          };
-        }
-      )?.error?.message ||
-        "Google Sheets API request failed.",
+      payload.error?.message || "Google Sheets API request failed.",
     );
   }
 
   return payload;
 }
 
-function columnName(index: number) {
+function columnName(index: number): string {
   let value = index + 1;
   let result = "";
 
   while (value > 0) {
     const remainder = (value - 1) % 26;
-    result =
-      String.fromCharCode(65 + remainder) + result;
+    result = String.fromCharCode(65 + remainder) + result;
     value = Math.floor((value - 1) / 26);
   }
 
   return result;
 }
 
-function findHeader(values: string[][]) {
+function findHeader(values: string[][]): number {
   let bestIndex = -1;
   let bestScore = 0;
 
   values.slice(0, 20).forEach((row, index) => {
     const headings = new Set(row.map(key));
-
-    const score = [
-      "taskname",
-      "status",
-      "owner",
-      "eta",
-      "livedate",
-    ].filter((heading) => headings.has(heading)).length;
+    const score = ["taskname", "status", "owner", "eta", "livedate"].filter((heading) =>
+      headings.has(heading),
+    ).length;
 
     if (score > bestScore) {
       bestIndex = index;
@@ -217,9 +184,7 @@ function findHeader(values: string[][]) {
   });
 
   if (bestIndex < 0 || bestScore < 2) {
-    throw new Error(
-      "Task Manager header row was not found.",
-    );
+    throw new Error("Task Manager header row was not found.");
   }
 
   return bestIndex;
@@ -228,105 +193,78 @@ function findHeader(values: string[][]) {
 export async function updateTaskRow(
   rowNumber: number,
   task: TaskWriteInput,
-) {
-  if (
-    !Number.isInteger(rowNumber) ||
-    rowNumber < 2 ||
-    rowNumber > 100000
-  ) {
+): Promise<{ updated: true; rowNumber: number; sheetTitle: string }> {
+  if (!Number.isInteger(rowNumber) || rowNumber < 2 || rowNumber > 100_000) {
     throw new Error("Invalid Google Sheet row number.");
   }
 
-  const statuses = [
-    "Pending",
-    "WIP",
-    "Completed",
-    "Blocked",
-  ];
-
-  if (!statuses.includes(clean(task.status))) {
-    throw new Error(
-      "Status must be Pending, WIP, Completed or Blocked.",
-    );
+  if (!["Pending", "WIP", "Completed", "Blocked"].includes(clean(task.status))) {
+    throw new Error("Status must be Pending, WIP, Completed or Blocked.");
   }
 
-  const spreadsheetId =
-    process.env.GOOGLE_SPREADSHEET_ID || "";
+  const spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID || "";
   const gid = Number(process.env.GOOGLE_SHEET_GID || 0);
 
   if (!spreadsheetId) {
     throw new Error("Missing GOOGLE_SPREADSHEET_ID.");
   }
 
-  const token = await getAccessToken();
+  const accessToken = await getAccessToken();
 
-  const metadata = (await googleRequest(
-    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
-      spreadsheetId,
-    )}?fields=sheets.properties(sheetId,title)`,
-    token,
-  )) as {
+  const metadata = await googleRequest<{
     sheets?: Array<{
       properties?: {
         sheetId?: number;
         title?: string;
       };
     }>;
-  };
+  }>(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
+      spreadsheetId,
+    )}?fields=sheets.properties(sheetId,title)`,
+    accessToken,
+  );
 
-  const selected = metadata.sheets?.find(
+  const selectedSheet = metadata.sheets?.find(
     (sheet) => sheet.properties?.sheetId === gid,
   );
+  const sheetTitle = selectedSheet?.properties?.title;
 
-  const title = selected?.properties?.title;
-
-  if (!title) {
-    throw new Error(
-      `No sheet tab found for gid ${gid}.`,
-    );
+  if (!sheetTitle) {
+    throw new Error(`No sheet tab found for gid ${gid}.`);
   }
 
-  const escapedTitle = String(title).replace(/'/g, "''");
-  const range = encodeURIComponent(
-    `'${escapedTitle}'!A:AZ`,
-  );
+  const escapedTitle = sheetTitle.replace(/'/g, "''");
+  const range = encodeURIComponent(`'${escapedTitle}'!A:AZ`);
 
-  const valuesPayload = (await googleRequest(
+  const valuesPayload = await googleRequest<{ values?: string[][] }>(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
       spreadsheetId,
     )}/values/${range}?valueRenderOption=FORMATTED_VALUE`,
-    token,
-  )) as {
-    values?: string[][];
-  };
+    accessToken,
+  );
 
   const values = valuesPayload.values || [];
   const headerIndex = findHeader(values);
   const headers = values[headerIndex] || [];
 
   if (rowNumber <= headerIndex + 1) {
-    throw new Error(
-      "The selected row is the header row.",
-    );
+    throw new Error("The selected row is the header row and cannot be edited.");
   }
 
-  const data = (
-    Object.keys(aliases) as Array<
-      keyof TaskWriteInput
-    >
-  )
+  const data = (Object.keys(aliases) as WritableField[])
     .map((field) => {
       const candidates = aliases[field].map(key);
       const columnIndex = headers.findIndex((header) =>
         candidates.includes(key(header)),
       );
 
-      if (columnIndex < 0) return null;
+      if (columnIndex < 0) {
+        return null;
+      }
 
       return {
-        range: `'${escapedTitle}'!${columnName(
-          columnIndex,
-        )}${rowNumber}`,
+        range: `'${escapedTitle}'!${columnName(columnIndex)}${rowNumber}`,
         values: [[clean(task[field])]],
       };
     })
@@ -336,24 +274,22 @@ export async function updateTaskRow(
       ): item is {
         range: string;
         values: string[][];
-      } => Boolean(item),
+      } => item !== null,
     );
 
   if (!data.length) {
-    throw new Error(
-      "No editable Task Manager columns were matched.",
-    );
+    throw new Error("No editable Task Manager columns were matched.");
   }
 
   await googleRequest(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
       spreadsheetId,
     )}/values:batchUpdate`,
-    token,
+    accessToken,
     {
       method: "POST",
       body: JSON.stringify({
-        valueInputOption: "RAW",
+        valueInputOption: "USER_ENTERED",
         data,
       }),
     },
@@ -362,6 +298,6 @@ export async function updateTaskRow(
   return {
     updated: true,
     rowNumber,
-    sheetTitle: title,
+    sheetTitle,
   };
 }
