@@ -11,7 +11,7 @@ function credentials():Credentials {
 }
 async function accessToken():Promise<string>{
   const c=credentials(); const now=Math.floor(Date.now()/1000); const key=await importPKCS8(c.private_key,"RS256");
-  const assertion=await new SignJWT({scope:"https://www.googleapis.com/auth/spreadsheets.readonly"}).setProtectedHeader({alg:"RS256",typ:"JWT"}).setIssuer(c.client_email).setSubject(c.client_email).setAudience(c.token_uri||"https://oauth2.googleapis.com/token").setIssuedAt(now).setExpirationTime(now+3600).sign(key);
+  const assertion=await new SignJWT({scope:"https://www.googleapis.com/auth/spreadsheets"}).setProtectedHeader({alg:"RS256",typ:"JWT"}).setIssuer(c.client_email).setSubject(c.client_email).setAudience(c.token_uri||"https://oauth2.googleapis.com/token").setIssuedAt(now).setExpirationTime(now+3600).sign(key);
   const body=new URLSearchParams({grant_type:"urn:ietf:params:oauth:grant-type:jwt-bearer",assertion});
   const r=await fetch(c.token_uri||"https://oauth2.googleapis.com/token",{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body,cache:"no-store"});
   const j=await r.json() as {access_token?:string;error_description?:string}; if(!r.ok||!j.access_token) throw new Error(j.error_description||"Google authentication failed."); return j.access_token;
@@ -23,5 +23,5 @@ export async function fetchDashboard(force=false):Promise<TaskApiResponse>{
   const token=await accessToken(); const meta=await googleJson(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets.properties(sheetId,title)`,token) as any;
   const sheet=meta.sheets?.find((s:any)=>s.properties?.sheetId===gid); const title=sheet?.properties?.title; if(!title) throw new Error(`No sheet tab found for gid ${gid}.`);
   const range=encodeURIComponent(`'${String(title).replace(/'/g,"''")}'!A:AZ`); const valuesJson=await googleJson(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${range}?valueRenderOption=FORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`,token) as any;
-  const tasks=rowsToTasks((valuesJson.values||[]) as string[][]); const data:TaskApiResponse={tasks,metrics:buildMetrics(tasks),meta:{sheetTitle:title,rowCount:tasks.length,fetchedAt:new Date().toISOString(),cacheState:"miss",readOnly:true}}; cache={expires:Date.now()+ttl,data}; return data;
+  const tasks=rowsToTasks((valuesJson.values||[]) as string[][]); const data:TaskApiResponse={tasks,metrics:buildMetrics(tasks),meta:{sheetTitle:title,rowCount:tasks.length,fetchedAt:new Date().toISOString(),cacheState:"miss",readOnly:false}}; cache={expires:Date.now()+ttl,data}; return data;
 }

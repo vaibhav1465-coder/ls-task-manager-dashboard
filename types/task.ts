@@ -60,6 +60,6 @@ export type TaskApiResponse = {
     rowCount: number;
     fetchedAt: string;
     cacheState: "hit" | "miss";
-    readOnly: true;
+    readOnly: boolean;
   };
 };
