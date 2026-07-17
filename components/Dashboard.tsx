@@ -25,10 +25,24 @@ type Task = {
 
 type ApiPayload = {
   tasks?: RawTask[];
-  data?: RawTask[];
+  data?: RawTask[] | { tasks?: RawTask[]; rows?: RawTask[] };
   rows?: RawTask[];
   meta?: Record<string, unknown>;
   error?: string;
+};
+
+const getPayloadRows = (payload: ApiPayload): RawTask[] => {
+  if (Array.isArray(payload.tasks)) return payload.tasks;
+  if (Array.isArray(payload.rows)) return payload.rows;
+  if (Array.isArray(payload.data)) return payload.data;
+
+  if (payload.data && typeof payload.data === "object") {
+    const nested = payload.data as { tasks?: RawTask[]; rows?: RawTask[] };
+    if (Array.isArray(nested.tasks)) return nested.tasks;
+    if (Array.isArray(nested.rows)) return nested.rows;
+  }
+
+  return [];
 };
 
 const REFRESH_MS = Number(process.env.NEXT_PUBLIC_REFRESH_INTERVAL_MS || 30000);
@@ -53,10 +67,9 @@ const aliases: Record<keyof Task, string[]> = {
 };
 
 const cleanKey = (value: string) =>
-  value
+  String(value ?? "")
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim();
+    .replace(/[^\p{L}\p{N}]+/gu, "");
 
 const pick = (row: RawTask, names: string[]) => {
   const entries = Object.entries(row);
@@ -70,23 +83,23 @@ const pick = (row: RawTask, names: string[]) => {
 const normalizeStatus = (value: string) => {
   const status = cleanKey(value);
 
-  if (["pending", "not started", "not yet started", "to do", "todo", "open"].includes(status)) {
+  if (["pending", "notstarted", "notyetstarted", "todo", "open"].includes(status)) {
     return "Pending";
   }
 
-  if (["wip", "work in progress", "in progress", "ongoing", "working", "started"].includes(status)) {
+  if (["wip", "workinprogress", "inprogress", "ongoing", "working", "started"].includes(status)) {
     return "WIP";
   }
 
-  if (["live", "completed", "complete", "done", "delivered", "closed"].includes(status)) {
-    return "Live";
+  if (["completed", "complete", "done", "delivered", "closed", "live"].includes(status)) {
+    return "Completed";
   }
 
-  if (["blocked", "on hold", "hold"].includes(status)) {
+  if (["blocked", "onhold", "hold"].includes(status)) {
     return "Blocked";
   }
 
-  return value.trim() || "Not updated";
+  return String(value ?? "").trim() || "Not updated";
 };
 const normalizeTask = (row: RawTask, index: number): Task => ({
   id: pick(row, aliases.id) || String(index + 1),
@@ -216,8 +229,25 @@ export default function Dashboard() {
       const response = await fetch("/api/tasks", { cache: "no-store" });
       const payload = (await response.json()) as ApiPayload;
       if (!response.ok) throw new Error(payload.error || "Unable to load dashboard data");
-      const raw = payload.tasks || payload.data || payload.rows || [];
-      setTasks(raw.map(normalizeTask).filter((task) => task.taskName || task.description));
+      const raw = getPayloadRows(payload);
+      const normalized = raw
+        .map(normalizeTask)
+        .filter(
+          (task) =>
+            task.taskName ||
+            task.description ||
+            task.taskType ||
+            task.owner ||
+            task.status !== "Not updated"
+        );
+
+      if (raw.length > 0 && normalized.length === 0) {
+        throw new Error(
+          "Google Sheet rows were received, but the dashboard could not match the Sheet columns."
+        );
+      }
+
+      setTasks(normalized);
       setUpdatedAt(new Date().toLocaleTimeString());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load dashboard data");
@@ -298,13 +328,13 @@ export default function Dashboard() {
     ["Reported", tasks.filter((task) => Boolean(task.reportDate)).length],
     ["Started", tasks.filter((task) => Boolean(task.startDate)).length],
     ["ETA Assigned", tasks.filter((task) => Boolean(task.eta)).length],
-    ["Live", tasks.filter(isLive).length],
+    ["Completed", tasks.filter(isLive).length],
   ] as [string, number][], [tasks]);
 
   const snapshot = useMemo(() => [
     `${metrics.pending} pending task${metrics.pending === 1 ? "" : "s"}`,
     `${metrics.wip} WIP task${metrics.wip === 1 ? "" : "s"}`,
-    `${metrics.live} live task${metrics.live === 1 ? "" : "s"}`,
+    `${metrics.live} completed task${metrics.live === 1 ? "" : "s"}`,
     `${metrics.delayed} delayed task${metrics.delayed === 1 ? "" : "s"}`,
     `${metrics.open} total open task${metrics.open === 1 ? "" : "s"}`,
   ], [metrics]);
@@ -349,7 +379,7 @@ export default function Dashboard() {
   };
 
   if (loading && !tasks.length) {
-    return <main className="command-center"><div className="loading-card">Loading Task Manager Command Centerâ€¦</div></main>;
+    return <main className="command-center"><div className="loading-card">Loading Task Manager Command Center...</div></main>;
   }
 
   return (
@@ -359,13 +389,13 @@ export default function Dashboard() {
 
       <header className="hero">
         <div>
-          <div className="eyebrow">LOKSATTA Â· LIVE OPERATIONS</div>
+          <div className="eyebrow">LOKSATTA  |  LIVE OPERATIONS</div>
           <h1>Task Manager <span>Command Center</span></h1>
           <p>Google Sheet remains the source of truth. This dashboard is a read-only executive presentation layer.</p>
         </div>
         <div className="hero-actions">
-          <div className="live-pill"><i /> Google Sheets Live <small>{tasks.length} rows Â· {updatedAt || "syncing"}</small></div>
-          <button className="icon-btn" onClick={load} aria-label="Refresh">â†»</button>
+          <div className="live-pill"><i /> Google Sheets Live <small>{tasks.length} rows  |  {updatedAt || "syncing"}</small></div>
+          <button className="icon-btn" onClick={load} aria-label="Refresh">{"\u21bb"}</button>
           <button className="signout-btn" onClick={() => { window.location.href = "/api/auth/logout"; }}>Sign out</button>
         </div>
       </header>
@@ -378,20 +408,20 @@ export default function Dashboard() {
           <h2>Executive Summary</h2>
         </div>
         <div className="snapshot-grid">
-          {snapshot.map((item, index) => <div key={item} className={`snapshot-item snapshot-${index}`}>âœ“ {item}</div>)}
+          {snapshot.map((item, index) => <div key={item} className={`snapshot-item snapshot-${index}`}> {item}</div>)}
         </div>
       </section>
 
       <section className="kpi-grid">
         {[
           ["Total Tasks", metrics.total, "", "All tracked assignments", "pulse"],
-          ["Live Tasks", metrics.live, "", `${pct(metrics.onTime, metrics.completedWithEta || 1)}% on-time delivery`, "check"],
+          ["Completed", metrics.live, "", `${pct(metrics.onTime, metrics.completedWithEta || 1)}% on-time delivery`, "check"],
           ["Pending", metrics.pending, "", "Not started yet", "clock"],
           ["WIP", metrics.wip, "", "Currently in progress", "clock"],
           ["Open Tasks", metrics.open, "", `${metrics.dueSoon} due this week`, "clock"],
           ["Delayed", metrics.delayed, "", "Needs delivery attention", "alert"],
           ["ETA Coverage", pct(metrics.etaAssigned, metrics.total), "%", `${metrics.total - metrics.etaAssigned} tasks missing ETA`, "calendar"],
-          ["Turnaround", metrics.avgTurnaround, "d", "Average report-to-live", "speed"],
+          ["Turnaround", metrics.avgTurnaround, "d", "Average report-to-completed", "speed"],
           ["High Priority Open", metrics.highOpen, "", "Needs management attention", "spark"],
           ["Operations Health", metrics.health, "%", `Data quality ${metrics.dataQuality}%`, "shield"],
         ].map(([label, value, suffix, hint, icon]) => (
@@ -414,12 +444,12 @@ export default function Dashboard() {
             <div className="health-ring" style={{ ["--score" as string]: `${metrics.health * 3.6}deg` }}>
               <div><strong>{metrics.health}%</strong><span>{metrics.health >= 85 ? "Excellent" : metrics.health >= 70 ? "Good" : "Needs attention"}</span></div>
             </div>
-            <div className="health-stars">{"â˜…â˜…â˜…â˜…â˜…".slice(0, Math.max(1, Math.round(metrics.health / 20)))}</div>
+            <div className="health-stars">{"â˜...â˜...â˜...â˜...â˜...".slice(0, Math.max(1, Math.round(metrics.health / 20)))}</div>
           </div>
         </article>
 
         <article className="panel lifecycle-panel">
-          <div className="panel-head"><h3>Delivery Timeline</h3><span>Reported â†’ Live</span></div>
+          <div className="panel-head"><h3>Delivery Timeline</h3><span>Reported  to  Live</span></div>
           <div className="lifecycle">
             {lifecycle.map(([label, value], index) => (
               <div className="life-step" key={label}>
@@ -444,7 +474,7 @@ export default function Dashboard() {
                 <div className="owner-card" key={owner}>
                   <div><b>{owner}</b><strong>{total}</strong></div>
                   <div className="owner-meter"><span style={{ width: `${pct(total, metrics.total)}%` }} /></div>
-                  <small>{active} active Â· {delayed} delayed Â· {pct(eta, total)}% ETA</small>
+                  <small>{active} active  |  {delayed} delayed  |  {pct(eta, total)}% ETA</small>
                 </div>
               );
             })}
@@ -455,7 +485,7 @@ export default function Dashboard() {
       <section className="secondary-grid">
         <article className="panel"><div className="panel-head"><h3>Team Distribution</h3><span>{metrics.total} tasks</span></div><MiniBars items={teamRows} total={metrics.total} /></article>
         <article className="panel"><div className="panel-head"><h3>Priority Mix</h3><span>{metrics.total} tasks</span></div><MiniBars items={priorityRows} total={metrics.total} /></article>
-        <article className="panel"><div className="panel-head"><h3>Status Mix</h3><span>Pending Â· WIP Â· Live</span></div><MiniBars items={statusRows} total={metrics.total} /></article>
+        <article className="panel"><div className="panel-head"><h3>Status Mix</h3><span>Pending  |  WIP  |  Live</span></div><MiniBars items={statusRows} total={metrics.total} /></article>
         <article className="panel"><div className="panel-head"><h3>Task Types</h3><span>{metrics.total} tasks</span></div><MiniBars items={typeRows} total={metrics.total} /></article>
         <article className="panel wide"><div className="panel-head"><h3>Delay Analytics</h3><span>Reasons and concentration</span></div><MiniBars items={delayRows.length ? delayRows : [["No delay reasons", 0]]} total={Math.max(1, delayRows.reduce((sum, [, value]) => sum + value, 0))} /></article>
       </section>
@@ -464,7 +494,7 @@ export default function Dashboard() {
         <div className="register-head">
           <div><div className="eyebrow">DETAILED OPERATIONS VIEW</div><h2>Task Register</h2><p>{filtered.length} of {tasks.length} tasks displayed</p></div>
           <div className="filters">
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search tasks, owner, teamâ€¦" />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search tasks, owner, team..." />
             <select value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)}>{options("owner").map((value) => <option key={value}>{value}</option>)}</select>
             <select value={teamFilter} onChange={(event) => setTeamFilter(event.target.value)}>{options("team").map((value) => <option key={value}>{value}</option>)}</select>
             <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>{options("status").map((value) => <option key={value}>{value}</option>)}</select>
@@ -486,11 +516,11 @@ export default function Dashboard() {
               {filtered.map((task) => (
                 <tr key={`${task.id}-${task.taskName}`}>
                   <td>{task.id}</td><td>{task.taskType}</td><td><span className="priority-pill">{task.priority || "Not provided"}</span></td>
-                  <td><strong>{task.taskName}</strong></td><td>{task.description || "â€”"}</td><td>{task.team || "â€”"}</td><td>{task.maker || "â€”"}</td>
-                  <td>{task.owner || "â€”"}</td><td>{task.checker || "â€”"}</td><td>{task.reportDate || "â€”"}</td><td>{task.startDate || "â€”"}</td>
-                  <td>{task.eta || "â€”"}</td><td>{task.liveDate || "â€”"}</td><td>{task.etaReason || "â€”"}</td>
+                  <td><strong>{task.taskName}</strong></td><td>{task.description || "-"}</td><td>{task.team || "-"}</td><td>{task.maker || "-"}</td>
+                  <td>{task.owner || "-"}</td><td>{task.checker || "-"}</td><td>{task.reportDate || "-"}</td><td>{task.startDate || "-"}</td>
+                  <td>{task.eta || "-"}</td><td>{task.liveDate || "-"}</td><td>{task.etaReason || "-"}</td>
                   <td><span className={`status-pill ${isLive(task) ? "live" : isDelayed(task) ? "delayed" : isWip(task) ? "wip" : isPending(task) ? "pending" : "open"}`}>{task.status}</span></td>
-                  <td>{task.comment || "â€”"}</td>
+                  <td>{task.comment || "-"}</td>
                 </tr>
               ))}
             </tbody>
@@ -498,7 +528,7 @@ export default function Dashboard() {
         </div>
       </section>
 
-      <footer><span>Sheet: Task Manager</span><span>Read-only Â· Auto refresh {Math.round(REFRESH_MS / 1000)}s</span></footer>
+      <footer><span>Sheet: Task Manager</span><span>Read-only  |  Auto refresh {Math.round(REFRESH_MS / 1000)}s</span></footer>
     </main>
   );
 }
