@@ -67,22 +67,43 @@ const pick = (row: RawTask, names: string[]) => {
   return "";
 };
 
+const normalizeStatus = (value: string) => {
+  const status = cleanKey(value);
+
+  if (["pending", "not started", "not yet started", "to do", "todo", "open"].includes(status)) {
+    return "Pending";
+  }
+
+  if (["wip", "work in progress", "in progress", "ongoing", "working", "started"].includes(status)) {
+    return "WIP";
+  }
+
+  if (["live", "completed", "complete", "done", "delivered", "closed"].includes(status)) {
+    return "Live";
+  }
+
+  if (["blocked", "on hold", "hold"].includes(status)) {
+    return "Blocked";
+  }
+
+  return value.trim() || "Not updated";
+};
 const normalizeTask = (row: RawTask, index: number): Task => ({
   id: pick(row, aliases.id) || String(index + 1),
-  taskType: pick(row, aliases.taskType) || "Not specified",
-  priority: pick(row, aliases.priority) || "Not specified",
-  taskName: pick(row, aliases.taskName) || `Task ${index + 1}`,
+  taskType: pick(row, aliases.taskType),
+  priority: pick(row, aliases.priority),
+  taskName: pick(row, aliases.taskName),
   description: pick(row, aliases.description),
-  team: pick(row, aliases.team) || "Not specified",
-  maker: pick(row, aliases.maker) || "Not specified",
-  owner: pick(row, aliases.owner) || "Not specified",
-  checker: pick(row, aliases.checker) || "Not specified",
+  team: pick(row, aliases.team),
+  maker: pick(row, aliases.maker),
+  owner: pick(row, aliases.owner),
+  checker: pick(row, aliases.checker),
   reportDate: pick(row, aliases.reportDate),
   startDate: pick(row, aliases.startDate),
   eta: pick(row, aliases.eta),
   liveDate: pick(row, aliases.liveDate),
   etaReason: pick(row, aliases.etaReason),
-  status: pick(row, aliases.status) || "Not specified",
+  status: normalizeStatus(pick(row, aliases.status)),
   comment: pick(row, aliases.comment),
 });
 
@@ -102,6 +123,10 @@ const isLive = (task: Task) => {
   const status = cleanKey(task.status);
   return status === "live" || status === "completed" || status === "done" || Boolean(task.liveDate);
 };
+
+const isPending = (task: Task) => cleanKey(task.status) === "pending";
+
+const isWip = (task: Task) => cleanKey(task.status) === "wip";
 
 const isOpen = (task: Task) => !isLive(task);
 
@@ -123,7 +148,13 @@ const daysBetween = (a: Date | null, b: Date | null) => {
 const countBy = (tasks: Task[], field: keyof Task) => {
   const map = new Map<string, number>();
   tasks.forEach((task) => {
-    const value = task[field] || "Not specified";
+    const missingLabel =
+      field === "owner" || field === "checker" || field === "maker"
+        ? "Not assigned"
+        : field === "status"
+          ? "Not updated"
+          : "Not provided";
+    const value = task[field] || missingLabel;
     map.set(value, (map.get(value) || 0) + 1);
   });
   return [...map.entries()].sort((a, b) => b[1] - a[1]);
@@ -186,7 +217,7 @@ export default function Dashboard() {
       const payload = (await response.json()) as ApiPayload;
       if (!response.ok) throw new Error(payload.error || "Unable to load dashboard data");
       const raw = payload.tasks || payload.data || payload.rows || [];
-      setTasks(raw.map(normalizeTask));
+      setTasks(raw.map(normalizeTask).filter((task) => task.taskName || task.description));
       setUpdatedAt(new Date().toLocaleTimeString());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load dashboard data");
@@ -204,6 +235,8 @@ export default function Dashboard() {
   const metrics = useMemo(() => {
     const total = tasks.length;
     const live = tasks.filter(isLive).length;
+    const pending = tasks.filter(isPending).length;
+    const wip = tasks.filter(isWip).length;
     const open = tasks.filter(isOpen).length;
     const delayed = tasks.filter(isDelayed).length;
     const etaAssigned = tasks.filter((task) => Boolean(task.eta)).length;
@@ -248,12 +281,13 @@ export default function Dashboard() {
         )
       )
     );
-    return { total, live, open, delayed, etaAssigned, onTime, completedWithEta, avgTurnaround, dueSoon, highOpen, dataQuality, health };
+    return { total, live, pending, wip, open, delayed, etaAssigned, onTime, completedWithEta, avgTurnaround, dueSoon, highOpen, dataQuality, health };
   }, [tasks]);
 
   const ownerRows = useMemo(() => countBy(tasks, "owner"), [tasks]);
   const teamRows = useMemo(() => countBy(tasks, "team"), [tasks]);
   const priorityRows = useMemo(() => countBy(tasks, "priority"), [tasks]);
+  const statusRows = useMemo(() => countBy(tasks, "status"), [tasks]);
   const typeRows = useMemo(() => countBy(tasks, "taskType"), [tasks]);
   const delayRows = useMemo(() => {
     const delayed = tasks.filter((task) => isDelayed(task) || task.etaReason);
@@ -267,19 +301,13 @@ export default function Dashboard() {
     ["Live", tasks.filter(isLive).length],
   ] as [string, number][], [tasks]);
 
-  const snapshot = useMemo(() => {
-    const capacity = ownerRows.length && ownerRows[0][1] <= Math.max(2, Math.ceil(metrics.total / Math.max(1, ownerRows.length)) * 1.4)
-      ? "Balanced"
-      : "Concentrated";
-    const healthLabel = metrics.health >= 85 ? "Excellent" : metrics.health >= 70 ? "Good" : metrics.health >= 50 ? "Needs attention" : "At risk";
-    return [
-      `${metrics.live} live task${metrics.live === 1 ? "" : "s"}`,
-      `${metrics.delayed} delayed task${metrics.delayed === 1 ? "" : "s"}`,
-      `Delivery health: ${healthLabel}`,
-      `Team capacity: ${capacity}`,
-      `${metrics.highOpen + metrics.delayed} management risk${metrics.highOpen + metrics.delayed === 1 ? "" : "s"}`,
-    ];
-  }, [metrics, ownerRows]);
+  const snapshot = useMemo(() => [
+    `${metrics.pending} pending task${metrics.pending === 1 ? "" : "s"}`,
+    `${metrics.wip} WIP task${metrics.wip === 1 ? "" : "s"}`,
+    `${metrics.live} live task${metrics.live === 1 ? "" : "s"}`,
+    `${metrics.delayed} delayed task${metrics.delayed === 1 ? "" : "s"}`,
+    `${metrics.open} total open task${metrics.open === 1 ? "" : "s"}`,
+  ], [metrics]);
 
   const options = (field: keyof Task) => ["All", ...countBy(tasks, field).map(([value]) => value)];
 
@@ -358,6 +386,8 @@ export default function Dashboard() {
         {[
           ["Total Tasks", metrics.total, "", "All tracked assignments", "pulse"],
           ["Live Tasks", metrics.live, "", `${pct(metrics.onTime, metrics.completedWithEta || 1)}% on-time delivery`, "check"],
+          ["Pending", metrics.pending, "", "Not started yet", "clock"],
+          ["WIP", metrics.wip, "", "Currently in progress", "clock"],
           ["Open Tasks", metrics.open, "", `${metrics.dueSoon} due this week`, "clock"],
           ["Delayed", metrics.delayed, "", "Needs delivery attention", "alert"],
           ["ETA Coverage", pct(metrics.etaAssigned, metrics.total), "%", `${metrics.total - metrics.etaAssigned} tasks missing ETA`, "calendar"],
@@ -425,6 +455,7 @@ export default function Dashboard() {
       <section className="secondary-grid">
         <article className="panel"><div className="panel-head"><h3>Team Distribution</h3><span>{metrics.total} tasks</span></div><MiniBars items={teamRows} total={metrics.total} /></article>
         <article className="panel"><div className="panel-head"><h3>Priority Mix</h3><span>{metrics.total} tasks</span></div><MiniBars items={priorityRows} total={metrics.total} /></article>
+        <article className="panel"><div className="panel-head"><h3>Status Mix</h3><span>Pending Â· WIP Â· Live</span></div><MiniBars items={statusRows} total={metrics.total} /></article>
         <article className="panel"><div className="panel-head"><h3>Task Types</h3><span>{metrics.total} tasks</span></div><MiniBars items={typeRows} total={metrics.total} /></article>
         <article className="panel wide"><div className="panel-head"><h3>Delay Analytics</h3><span>Reasons and concentration</span></div><MiniBars items={delayRows.length ? delayRows : [["No delay reasons", 0]]} total={Math.max(1, delayRows.reduce((sum, [, value]) => sum + value, 0))} /></article>
       </section>
@@ -454,11 +485,11 @@ export default function Dashboard() {
             <tbody>
               {filtered.map((task) => (
                 <tr key={`${task.id}-${task.taskName}`}>
-                  <td>{task.id}</td><td>{task.taskType}</td><td><span className="priority-pill">{task.priority}</span></td>
-                  <td><strong>{task.taskName}</strong></td><td>{task.description || "â€”"}</td><td>{task.team}</td><td>{task.maker}</td>
-                  <td>{task.owner}</td><td>{task.checker}</td><td>{task.reportDate || "â€”"}</td><td>{task.startDate || "â€”"}</td>
+                  <td>{task.id}</td><td>{task.taskType}</td><td><span className="priority-pill">{task.priority || "Not provided"}</span></td>
+                  <td><strong>{task.taskName}</strong></td><td>{task.description || "â€”"}</td><td>{task.team || "â€”"}</td><td>{task.maker || "â€”"}</td>
+                  <td>{task.owner || "â€”"}</td><td>{task.checker || "â€”"}</td><td>{task.reportDate || "â€”"}</td><td>{task.startDate || "â€”"}</td>
                   <td>{task.eta || "â€”"}</td><td>{task.liveDate || "â€”"}</td><td>{task.etaReason || "â€”"}</td>
-                  <td><span className={`status-pill ${isLive(task) ? "live" : isDelayed(task) ? "delayed" : "open"}`}>{task.status}</span></td>
+                  <td><span className={`status-pill ${isLive(task) ? "live" : isDelayed(task) ? "delayed" : isWip(task) ? "wip" : isPending(task) ? "pending" : "open"}`}>{task.status}</span></td>
                   <td>{task.comment || "â€”"}</td>
                 </tr>
               ))}
