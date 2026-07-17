@@ -140,6 +140,8 @@ export default function Dashboard() {
   const [dateFilter, setDateFilter] = useState("All");
   const [editingTask, setEditingTask] =
     useState<Task | null>(null);
+  const [creatingTask, setCreatingTask] =
+    useState(false);
 
   const load = useCallback(
     async (force = false) => {
@@ -198,6 +200,20 @@ export default function Dashboard() {
 
   const tasks = payload?.tasks || [];
   const metrics = payload?.metrics;
+
+  const nextSerial = useMemo(() => {
+    const currentMaximum = tasks.reduce(
+      (maximum, task) => {
+        const value = Number(task.serial);
+        return Number.isFinite(value)
+          ? Math.max(maximum, value)
+          : maximum;
+      },
+      0,
+    );
+
+    return String(currentMaximum + 1);
+  }, [tasks]);
 
   const options = useCallback(
     (field: FilterKey): string[] => {
@@ -790,6 +806,17 @@ export default function Dashboard() {
             <button
               className="primary-button"
               type="button"
+              onClick={() => {
+                setEditingTask(null);
+                setCreatingTask(true);
+              }}
+            >
+              + Add Task
+            </button>
+
+            <button
+              className="primary-button"
+              type="button"
               onClick={exportCsv}
             >
               Export CSV
@@ -862,9 +889,10 @@ export default function Dashboard() {
                     <button
                       className="edit-task-button"
                       type="button"
-                      onClick={() =>
-                        setEditingTask(task)
-                      }
+                      onClick={() => {
+                        setCreatingTask(false);
+                        setEditingTask(task);
+                      }}
                     >
                       Edit
                     </button>
@@ -887,9 +915,15 @@ export default function Dashboard() {
       </footer>
 
       <TaskEditor
+        mode={creatingTask ? "create" : "edit"}
         task={editingTask}
-        onClose={() => setEditingTask(null)}
+        defaultSerial={nextSerial}
+        onClose={() => {
+          setCreatingTask(false);
+          setEditingTask(null);
+        }}
         onSaved={async () => {
+          setCreatingTask(false);
           setEditingTask(null);
           await load(true);
         }}
