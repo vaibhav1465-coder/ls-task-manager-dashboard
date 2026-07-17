@@ -134,7 +134,7 @@ const parseDate = (value: string): Date | null => {
 
 const isLive = (task: Task) => {
   const status = cleanKey(task.status);
-  return status === "live" || status === "completed" || status === "done" || Boolean(task.liveDate);
+  return ["completed", "complete", "done", "delivered", "closed", "live"].includes(status);
 };
 
 const isPending = (task: Task) => cleanKey(task.status) === "pending";
@@ -145,12 +145,16 @@ const isOpen = (task: Task) => !isLive(task);
 
 const isDelayed = (task: Task) => {
   const eta = parseDate(task.eta);
-  const live = parseDate(task.liveDate);
+  if (!eta) return false;
+
+  if (isLive(task)) {
+    const completedDate = parseDate(task.liveDate);
+    return Boolean(completedDate && completedDate.getTime() > eta.getTime());
+  }
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  if (!eta) return false;
-  if (live) return live.getTime() > eta.getTime();
-  return isOpen(task) && today.getTime() > eta.getTime();
+  return today.getTime() > eta.getTime();
 };
 
 const daysBetween = (a: Date | null, b: Date | null) => {
@@ -271,12 +275,16 @@ export default function Dashboard() {
     const delayed = tasks.filter(isDelayed).length;
     const etaAssigned = tasks.filter((task) => Boolean(task.eta)).length;
     const onTime = tasks.filter((task) => {
+      if (!isLive(task)) return false;
       const eta = parseDate(task.eta);
       const liveDate = parseDate(task.liveDate);
       return eta && liveDate && liveDate.getTime() <= eta.getTime();
     }).length;
-    const completedWithEta = tasks.filter((task) => parseDate(task.eta) && parseDate(task.liveDate)).length;
+    const completedWithEta = tasks.filter(
+      (task) => isLive(task) && parseDate(task.eta) && parseDate(task.liveDate)
+    ).length;
     const turnaround = tasks
+      .filter(isLive)
       .map((task) => daysBetween(parseDate(task.reportDate), parseDate(task.liveDate)))
       .filter((value): value is number => value !== null);
     const avgTurnaround = turnaround.length
